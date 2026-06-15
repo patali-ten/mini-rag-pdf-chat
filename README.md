@@ -86,14 +86,6 @@ python rag.py
 6. Retrieve the most relevant chunks
 7. Generate an answer using Gemini
 
-## Future Improvements
-
-* Persistent FAISS index storage
-* Multi-document support
-* Hybrid search (keyword + vector search)
-* Web interface with Streamlit
-* Conversation memory
-* Advanced reranking models
 
 ## Learning Objectives
 
