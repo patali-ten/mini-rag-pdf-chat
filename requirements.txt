@@ -1,3 +1,5 @@
 pymupdf
 google-genai
+faiss-cpu
+numpy
 python-dotenv
