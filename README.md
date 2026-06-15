@@ -25,23 +25,20 @@ A Retrieval-Augmented Generation (RAG) application that allows users to ask ques
 
 ## Architecture
 
-PDF Document
-    ↓
-Text Extraction
-    ↓
-Chunking
-    ↓
-Gemini Embeddings
-    ↓
-FAISS Vector Index
-    ↓
-Semantic Search
-    ↓
-Relevant Context Retrieval
-    ↓
-Gemini 2.5 Flash
-    ↓
-Answer Generation
+```text
+📄 PDF Document ➔ 🔍 Text Extraction ➔ ✂️ Chunking ➔ 🧬 Gemini Embeddings ➔ 🗄️ FAISS Index
+                                                                              │
+📝 Answer Generation 💾 💡◀─── ⚡ Gemini 2.5 Flash ◀─── 📥 Context Retrieval ◀─── 🎯 Semantic Search
+```
+1. **📄 PDF Document** — The source input file.
+2. **🔍 Text Extraction** — Parsing and extracting raw text from the document.
+3. **✂️ Chunking** — Segmenting the text into manageable, overlapping tokens.
+4. **🧬 Gemini Embeddings** — Converting text chunks into high-dimensional vectors.
+5. **🗄️ FAISS Vector Index** — Storing and indexing embeddings for fast similarity mapping.
+6. **🎯 Semantic Search** — Matching the user's query against the indexed vectors.
+7. **📥 Relevant Context Retrieval** — Fetching the most relevant text chunks.
+8. **⚡ Gemini 2.5 Flash** — Passing the context and query to the language model.
+9. **📝 Answer Generation** — Delivering the final synthesized response.
 
 ## Installation
 
