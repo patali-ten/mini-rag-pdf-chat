@@ -47,10 +47,10 @@ def build_faiss_index(client, chunks):
 
     matrix = np.stack(embeddings)
     dimension = matrix.shape[1]           
-    index = faiss.IndexFlatL2(dimension)  
+    index = faiss.IndexFlatL2(dimension)  #FAISS is a common vector search library developed by META
     index.add(matrix)                     
 
-    return index, embeddings
+    return index
 
 # ── 5. FIND TOP CHUNKS BY MEANING ────────────────────────
 def find_top_chunks(client, question, chunks, index, top_n=3):
@@ -118,7 +118,7 @@ if __name__ == "__main__":
     print(f"  → {len(chunks)} chunks created")
 
     print("\nBuilding FAISS index...")
-    index, embeddings = build_faiss_index(client, chunks)
+    index = build_faiss_index(client, chunks)
     print(f"  → Index built with {index.ntotal} vectors")
 
     question = input("\nAsk a question: ")
