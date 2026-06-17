@@ -1,74 +1,80 @@
-import fitz
-import numpy as np
-import faiss
 import os
-import time
+from dotenv import load_dotenv
 from google import genai
 from google.genai import errors
-from dotenv import load_dotenv
+
+# ── LangChain imports ────────────────────────────────────
+from langchain_community.document_loaders import PyMuPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_core.embeddings import Embeddings
 
 # Explicitly load environment variables from local .env
 load_dotenv()
 
-# ── 1. LOAD ──────────────────────────────────────────────
-def load_pdf(path):
-    doc = fitz.open(path)
-    full_text = ""
-    for page in doc:
-        full_text += page.get_text()
-    return full_text
 
-# ── 2. SPLIT INTO CHUNKS ─────────────────────────────────
-def split_into_chunks(text, chunk_size=300):
-    words = text.split()
-    chunks = []
-    for i in range(0, len(words), chunk_size):
-        chunk = " ".join(words[i : i + chunk_size])
-        chunks.append(chunk)
+# ── 0. CUSTOM EMBEDDINGS WRAPPER ─────────────────────────
+# LangChain's FAISS vector store needs an "Embeddings" object with two
+# methods: embed_documents() for many texts, and embed_query() for one.
+# We wrap our existing Gemini embedding call so LangChain can use it.
+class GeminiEmbeddings(Embeddings):
+    def __init__(self, client, model="gemini-embedding-2"):
+        self.client = client
+        self.model = model
+
+    def embed_documents(self, texts):
+        vectors = []
+        for i, text in enumerate(texts):
+            print(f"    Embedding chunk {i+1}/{len(texts)}...")
+            vectors.append(self._embed_one(text))
+        return vectors
+
+    def embed_query(self, text):
+        return self._embed_one(text)
+
+    def _embed_one(self, text):
+        result = self.client.models.embed_content(
+            model=self.model,
+            contents=text
+        )
+        return result.embeddings[0].values
+
+
+# ── 1. LOAD (LangChain document loader) ──────────────────
+def load_pdf(path):
+    loader = PyMuPDFLoader(path)
+    documents = loader.load()  # one LangChain "Document" per page, with metadata
+    return documents
+
+
+# ── 2. SPLIT INTO CHUNKS (LangChain text splitter) ───────
+def split_into_chunks(documents, chunk_size=1500, chunk_overlap=200):
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap
+    )
+    chunks = splitter.split_documents(documents)
     return chunks
 
-# ── 3. GET EMBEDDING FOR ONE PIECE OF TEXT ───────────────
-def get_embedding(client, text):
-    result = client.models.embed_content(
-        model="gemini-embedding-2",
-        contents=text
-    )
-    vector = result.embeddings[0].values
-    return np.array(vector, dtype="float32")
 
-# ── 4. BUILD FAISS INDEX FROM ALL CHUNKS ─────────────────
-def build_faiss_index(client, chunks):
-    print("  Embedding chunks (this may take a moment)...")
-    embeddings = []
-    for i, chunk in enumerate(chunks):
-        print(f"    Embedding chunk {i+1}/{len(chunks)}...")
-        vec = get_embedding(client, chunk)
-        embeddings.append(vec)
+# ── 3 & 4. BUILD FAISS INDEX (LangChain FAISS vector store) ──
+def build_faiss_index(embeddings, chunks):
+    print("  Embedding chunks and building FAISS index (this may take a moment)...")
+    vector_store = FAISS.from_documents(chunks, embeddings)
+    return vector_store
 
-    matrix = np.stack(embeddings)
-    dimension = matrix.shape[1]           
-    index = faiss.IndexFlatL2(dimension)  #FAISS is a common vector search library developed by META
-    index.add(matrix)                     
-
-    return index
 
 # ── 5. FIND TOP CHUNKS BY MEANING ────────────────────────
-def find_top_chunks(client, question, chunks, index, top_n=3):
-    question_vec = get_embedding(client, question)
-    question_vec = question_vec.reshape(1, -1)
-
-    # FIXED: Ensure top_n is never larger than our actual total chunk count
-    actual_top_n = min(top_n, len(chunks))
-
-    distances, indices = index.search(question_vec, actual_top_n)
-
+def find_top_chunks(vector_store, question, top_n=3):
+    results = vector_store.similarity_search_with_score(question, k=top_n)
     top_chunks = []
-    for i, idx in enumerate(indices[0]):
+    for doc, score in results:
         top_chunks.append({
-            "chunk": chunks[idx],
-            "distance": float(distances[0][i])   
+            "chunk": doc.page_content,
+            "distance": float(score)
         })
     return top_chunks
+
 
 # ── 6. ASK GEMINI ────────────────────────────────────────
 def ask_gemini(client, question, top_chunks):
@@ -87,7 +93,6 @@ Question:
 
 Answer:"""
 
-    # FIXED: Wrapped in a try-except block to handle 503 high demand spikes cleanly
     try:
         response = client.models.generate_content(
             model="gemini-2.5-flash",
@@ -102,6 +107,7 @@ Answer:"""
             )
         raise e
 
+
 # ── MAIN ─────────────────────────────────────────────────
 if __name__ == "__main__":
     api_key = os.getenv("GEMINI_API_KEY")
@@ -109,22 +115,24 @@ if __name__ == "__main__":
         raise ValueError("CRITICAL ERROR: GEMINI_API_KEY environment token is missing or blank!")
 
     client = genai.Client(api_key=api_key)
+    embeddings = GeminiEmbeddings(client)
 
     print("Loading PDF...")
-    text = load_pdf("sample.pdf")
+    documents = load_pdf("sample.pdf")
+    print(f"  → {len(documents)} pages loaded")
 
     print("Splitting into chunks...")
-    chunks = split_into_chunks(text, chunk_size=300)
+    chunks = split_into_chunks(documents)
     print(f"  → {len(chunks)} chunks created")
 
     print("\nBuilding FAISS index...")
-    index = build_faiss_index(client, chunks)
-    print(f"  → Index built with {index.ntotal} vectors")
+    vector_store = build_faiss_index(embeddings, chunks)
+    print(f"  → Index built with {vector_store.index.ntotal} vectors")
 
     question = input("\nAsk a question: ")
 
     print("\nSearching by meaning...")
-    top_chunks = find_top_chunks(client, question, chunks, index, top_n=3)
+    top_chunks = find_top_chunks(vector_store, question, top_n=3)
 
     print(f"\n  Top {len(top_chunks)} chunks found:")
     for i, item in enumerate(top_chunks, 1):
